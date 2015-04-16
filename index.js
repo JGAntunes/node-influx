@@ -13,7 +13,8 @@ var defaultOptions = {
   failoverTimeout     : 60000,
   requestTimeout      : null,
   maxRetries          : 2,
-  timePrecision       : 'ms'
+  timePrecision       : 'ms',
+  retentionPolicy     : 'default'
 };
 
 var InfluxDB = function(options) {
@@ -77,88 +78,62 @@ InfluxDB.prototype.url = function(database, query) {
   });
 };
 
-InfluxDB.prototype.createDatabase = function(databaseName, options, callback) {
-  if (typeof callback === 'undefined') {
-      callback = options;
-      options = {};
-  }
-
-  this.request.post({
-    url: this.url('cluster/database_configs/' + databaseName),
-    headers: {
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify(options, null)
-  }, this._parseCallback(callback));
+InfluxDB.prototype.createDatabase = function(databaseName, callback) {
+  var query = 'create database ' + databaseName;
+  this.query(query, callback);
 };
 
 InfluxDB.prototype.deleteDatabase = function(databaseName, callback) {
-  this.request.get({
-    method: 'DELETE',
-    url:this.url('db/' + databaseName)
-  }, this._parseCallback(callback));
+  var query = 'delete database ' + databaseName;
+  this.query(query, callback);
 };
 
-InfluxDB.prototype.getDatabaseNames = function(callback) {
-  this.request.get({
-    url: this.url('db'),
-    json: true
-  }, this._parseCallback(function(err, dbs) {
-    if(err) {
-      return callback(err, dbs);
-    }
-    return callback(err, _.map(dbs, function(db) { return db.name; }));
-  }));
+InfluxDB.prototype.getDatabases = function(callback) {
+  var query = 'show databases';
+  this.query(query, callback);
 };
 
+InfluxDB.prototype.getMeasurements = function(options, callback) {
+  callback = callback || options;
+  if (typeof options === 'function'){
+    options = {};
+  }
+  var query = 'show measurements ' + options.query;
 
-InfluxDB.prototype.getSeriesNames = function(databaseName,callback) {
-  // if database defined on connection level use it unless overwritten
-  if ( this.options.database && typeof databaseName === 'function' ) {
-    callback = databaseName;
-    databaseName = this.options.database;
+  this.query(query, options, callback);
+};
+
+InfluxDB.prototype.getSeries = function(options, callback) {
+  callback = callback || options;
+  if (typeof options === 'function'){
+    options = {};
+  }
+  var query = 'show series ' + options.query;
+  
+  this.query(query, options, callback);
+};
+
+InfluxDB.prototype.getUsers = function(options, callback) {
+  callback = callback || options;
+  if (typeof options === 'function'){
+    options = {};
   }
 
-  this.request.get({
-    url: this.url('db/' + databaseName + '/series', {q: 'list series'}),
-    json: true
-  }, this._parseCallback(function(err, results) {
-    if(err) {
-      return callback(err, results);
-    }
-    return callback(err, _.map(results[0].points, function(series) { return series[1]; }));
-  }));
+  var query = 'show users';
+  this.query(query, options, callback);
 };
 
-
-InfluxDB.prototype.getUsers = function(databaseName, callback) {
-  this.request.get({
-    url: this.url('db/' + databaseName + '/users'),
-    json: true
-  }, this._parseCallback(callback));
+InfluxDB.prototype.createUser = function(username, password, options, callback) {
+  callback = callback || options;
+  if (typeof options === 'function'){
+    options = {};
+  }
+  var query = 'create user ' + username + ' with password ' + password;
+  
+  this.query(query, options, callback);
 };
 
-InfluxDB.prototype.getUser = function(databaseName, username, callback) {
-  this.request.get({
-    url: this.url('db/' + databaseName + '/users/' + username),
-    json: true
-  }, this._parseCallback(callback));
-};
-
-InfluxDB.prototype.createUser = function(databaseName, username, password, callback) {
-  this.request.post({
-    url: this.url('db/' + databaseName + '/users'),
-    headers: {
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      name: username,
-      password: password
-    }, null)
-  }, this._parseCallback(callback));
-};
-
-InfluxDB.prototype.updateUser = function (databaseName, userName, options, callback)
+/*InfluxDB.prototype.updateUser = function (databaseName, userName, options, callback)
 {
   this.request.post({
     url: this.url('db/' + databaseName + '/users/' + userName),
@@ -167,43 +142,23 @@ InfluxDB.prototype.updateUser = function (databaseName, userName, options, callb
     },
     body: JSON.stringify(options, null)
   }, this._parseCallback(callback));
-};
+};*/
 
-InfluxDB.prototype.writeSeries = function(series, options, callback) {
+InfluxDB.prototype.writeSeries = function(series, tags, options, callback) {
   if(typeof options === 'function') {
     callback = options;
     options  = {};
   }
-  if ('undefined' === typeof options) options = {};
+  options = options || {};
 
   var query = options.query || {};
-  var data = [];
+  var data = {};
+  data = series;
+  data.tags = tags;
+  data.database = options.database || this.options.database;
+  data.retentionPolicy = options.retentionPolicy || this.options.retentionPolicy;
 
-  _.each(series, function(dataPoints, seriesName) {
-    var datum = { points: [], name: seriesName, columns: [] };
-    // Collect column names first
-    var columns = {};
-    _.each(dataPoints, function(values) {
-      _.each(values, function(_, k) {
-        columns[k] = true;
-      });
-    });
-    datum.columns = _.keys(columns);
-    // Add point values with null where needed
-    _.each(dataPoints, function(values) {
-      var point = [];
-      _.each(datum.columns, function(k) {
-        var v = typeof values[k] === 'undefined' ? null : values[k];
-        if(k === 'time' && v instanceof Date) {
-          v = v.valueOf();
-          query.time_precision = 'ms';
-        }
-        point.push(v);
-      });
-      datum.points.push(point);
-    });
-    data.push(datum);
-  });
+  console.log(data);
 
   this.request.post({
     url: this.seriesUrl(options.database,query),
@@ -215,68 +170,63 @@ InfluxDB.prototype.writeSeries = function(series, options, callback) {
   }, this._parseCallback(callback));
 };
 
-InfluxDB.prototype.writePoint = function(seriesName, values, options, callback) {
+InfluxDB.prototype.writePoint = function(seriesName, values, tags, options, callback) {
   var data = {};
-  data[seriesName] = [values];
-  this.writeSeries(data, options, callback);
+  var dataValue = {};
+  dataValue.fields = values;
+  dataValue.name = values.name || seriesName;
+  data.points = [dataValue];
+  this.writeSeries(data, tags, options, callback);
 };
 
-InfluxDB.prototype.writePoints = function(seriesName, points, options, callback) {
-  var data = {};
-  data[seriesName] = points;
-  this.writeSeries(data, options, callback);
+InfluxDB.prototype.writePoints = function(seriesName, points, tags, options, callback) {
+  var data = {points: points};
+  _.each(data.points, function(p){
+    var dataValue = {};
+    dataValue.fields = p;
+    dataValue.name = p.name || seriesName;
+  });
+  this.writeSeries(data, tags, options, callback);
 };
 
-InfluxDB.prototype.query = function(query, callback) {
-  this.request.get({
-    url: this.url('db/' + this.options.database + '/series', { q: query }),
-    json: true
-  }, this._parseCallback(callback));
-};
-
-InfluxDB.prototype.dropSeries  = function(databaseName, seriesName, callback) {
-  if ('function' === typeof seriesName)
-  {
-    callback=seriesName;
-    seriesName = databaseName;
-    databaseName = this.options.database;
+InfluxDB.prototype.query = function(query, options, callback) {
+  callback = callback || options;
+  if (options === typeof 'function'){
+    options = {};
   }
+  var databaseName = options.database || this.options.database;
+
   this.request.get({
-    url: this.url('db/' + databaseName + '/series/' + seriesName),
-    method : 'DELETE',
+    url: this.url('query/', { q: query, db: databaseName}),
     json: true
   }, this._parseCallback(callback));
 };
 
-InfluxDB.prototype.getContinuousQueries = function(databaseName,callback)
-{
-  if ('function' === typeof databaseName)
-  {
-    callback = databaseName;
-    databaseName = this.options.database;
+InfluxDB.prototype.dropSeries  = function(seriesName, options, callback) {
+  callback = callback || options;
+  if (options === typeof 'function'){
+    options = {};
   }
-  this.request.get({
-    url: this.url('db/' + databaseName + '/series', { q: 'list continuous queries' }),
-    json: true
-  }, this._parseCallback(callback));
+  var query = 'drop ' + seriesName + ' ' + options.query;
+
+  this.query(query, options, callback);
+};
+
+InfluxDB.prototype.getContinuousQueries = function(options, callback) {
+
+  var query = 'show continuous queries';
+  this.query(query, options, callback);
 };
 
 
-InfluxDB.prototype.dropContinuousQuery  = function(databaseName, queryID, callback) {
-  if ('function' === typeof queryID)
-  {
-    callback=queryID;
-    queryID = databaseName;
-    databaseName = this.options.database;
-  }
-  this.request.get({
-    url: this.url('db/' + databaseName + '/series', { q: 'drop continuous query '+queryID }),
-    json: true
-  }, this._parseCallback(callback));
+InfluxDB.prototype.dropContinuousQuery  = function(queryID, options, callback) {
+
+  var query = 'drop continuous query ' + queryID;
+  this.query(query, options, callback);
 };
 
 
-InfluxDB.prototype.getShardSpaces = function(databaseName, callback) {
+/*InfluxDB.prototype.getShardSpaces = function(databaseName, callback) {
   if ('function' === typeof databaseName) {
     callback = databaseName;
     databaseName = this.options.database;
@@ -334,12 +284,11 @@ InfluxDB.prototype.deleteShardSpace = function(databaseName, shardSpaceName, cal
     method: 'DELETE',
     url: this.url('cluster/shard_spaces/' + databaseName + '/' + shardSpaceName)
   }, this._parseCallback(callback));
-};
+};*/
 
 
 InfluxDB.prototype.seriesUrl  = function(databaseName,query) {
-  if ( !databaseName ) databaseName = this.options.database;
-  return this.url('db/' + databaseName + '/series',query);
+  return this.url('write',query);
 };
 
 InfluxDB.prototype.getHostsAvailable = function()
