@@ -1,5 +1,6 @@
 var influx = require('./');
 var assert = require('assert');
+var _      = require('underscore');
 
 
 describe('InfluxDB', function () {
@@ -102,17 +103,19 @@ describe('InfluxDB', function () {
     });
   });
 
-  describe('#getDatabaseNames', function () {
+  describe('#getDatabases', function () {
     it('should return array of database names', function (done) {
-      client.getDatabaseNames(function (err, dbs) {
+      client.getDatabases(function (err, dbs) {
         if (err) return done(err);
-        assert(dbs instanceof Array);
-        assert.notEqual(dbs.indexOf(info.db.name), -1);
+        assert(dbs.databases instanceof Array);
+        assert(_.reduce(dbs.databases, function(memo, db){
+          return memo || db.name === info.db.name;
+        }, false));
         done();
       });
     });
     it('should bubble errors through', function (done) {
-      failClient.getDatabaseNames(function (err) {
+      failClient.getDatabases(function (err) {
         assert(err instanceof Error);
         done();
       });
@@ -130,9 +133,9 @@ describe('InfluxDB', function () {
 
   describe('#getUsers', function() {
     it('should get an array of database users', function (done) {
-      client.getUsers(info.db.name, function(err, users) {
+      client.getUsers({database: info.db.name}, function(err, users) {
         assert.equal(err, null);
-        assert(users instanceof Array);
+        assert(users.users instanceof Array);
         assert.equal(users.length, 0);
         done();
       });
@@ -141,29 +144,29 @@ describe('InfluxDB', function () {
 
   describe('#createUser', function () {
     it('should create a user without error', function (done) {
-      client.createUser(info.db.name, info.db.username, info.db.password, done);
+      client.createUser(info.db.username, info.db.password, {database: info.db.name}, done);
     });
     it('should error when creating an existing user', function (done) {
-      client.createUser(info.db.name, info.db.username, info.db.password, function (err) {
+      client.createUser(info.db.username, info.db.password, {database: info.db.name}, function (err) {
         assert(err instanceof Error);
         done();
       });
     });
   });
 
-  describe('#getUser', function() {
+/*  describe('#getUser', function() {
     it('should get a database user without error', function (done) {
-      client.getUser(info.db.name, info.db.username, done);
+      client.getUser(info.db.username, {database: info.db.name}, done);
     });
     it('should error when getting non existing user', function (done) {
-      client.getUser(info.db.name, 'johndoe', function (err) {
+      client.getUser('johndoe', {database: info.db.name}, function (err) {
         assert(err instanceof Error);
         done();
       });
     });
-  });
+  });*/
 
-  describe('#updateUser', function () {
+/*  describe('#updateUser', function () {
     it('should update user without error', function (done) {
       client.updateUser(info.db.name, info.db.username, {admin: true}, done);
     });
@@ -173,15 +176,15 @@ describe('InfluxDB', function () {
         done();
       });
     });
-  });
+  });*/
 
 
   describe('#writePoint', function () {
     it('should write a generic point into the database', function (done) {
-      dbClient.writePoint(info.series.name, {username: 'reallytrial', value: 232}, done);
+      dbClient.writePoint(info.series.name, {username: 'reallytrial', value: 232}, {}, done);
     });
     it('should write a point with time into the database', function (done) {
-      dbClient.writePoint(info.series.name, {time: new Date(), value: 232}, done);
+      dbClient.writePoint(info.series.name, {time: new Date(), value: 232}, {}, done);
     });
   });
 
@@ -193,7 +196,7 @@ describe('InfluxDB', function () {
         {username: 'welovefashion', value: 232},
         {username: 'welovefashion', value: 4711}
       ];
-      dbClient.writePoints(info.series.name, points, done);
+      dbClient.writePoints(info.series.name, points, {company: 'foo'}, done);
     });
     it('should write multiple points to the same time series, differing column names', function (done) {
       var points = [
@@ -201,7 +204,7 @@ describe('InfluxDB', function () {
         {username: 'welovefashion', othervalue: 232},
         {otherusername: 'welovefashion', value: 4711}
       ];
-      dbClient.writePoints(info.series.name, points, done);
+      dbClient.writePoints(info.series.name, points, {company: 'bar'}, done);
     });
   });
 
@@ -216,7 +219,7 @@ describe('InfluxDB', function () {
         series1: points,
         series2: points
       };
-      dbClient.writeSeries(data, done);
+      dbClient.writeSeries(data, {company: 'foobar'}, done);
     });
     it('should write multiple points to multiple time series, differing column names', function (done) {
       var points = [
@@ -228,7 +231,7 @@ describe('InfluxDB', function () {
         series1: points,
         series2: points
       };
-      dbClient.writeSeries(data, done);
+      dbClient.writeSeries(data, {company: 'barfoo'}, done);
     });
   });
 
@@ -248,7 +251,7 @@ describe('InfluxDB', function () {
   describe('#query', function () {
     it('should create a continuous query', function (done) {
       dbClient.query('SELECT MEDIAN(value) FROM ' + info.series.name + ' INTO ' + info.series.name + '.downsampled;', function (err, res) {
-        assert.equal(err, null);
+        assert.equal(err, {});
         assert(res instanceof Array);
         assert.equal(res.length, 0);
         done();
@@ -269,7 +272,7 @@ describe('InfluxDB', function () {
 
   describe('#dropContinuousQuery', function () {
     it('should drop the continuous query from the database', function (done) {
-      dbClient.getContinuousQueries(info.db.name, function (err, res) {
+      dbClient.getContinuousQueries({database: info.db.name}, function (err, res) {
         dbClient.dropContinuousQuery(res[0].points[0][1], function (err) {
           assert.equal(err, null);
           done();
@@ -278,7 +281,7 @@ describe('InfluxDB', function () {
     });
   });
 
-  describe('#getShardSpaces', function () {
+  /*describe('#getShardSpaces', function () {
     it('should fetch all shard spaces from the database', function (done) {
       dbClient.getShardSpaces(function (err, res) {
         assert.equal(err, null);
@@ -332,7 +335,7 @@ describe('InfluxDB', function () {
       });
     });
   });
-
+*/
 
   describe('#query failover', function () {
     this.timeout(30000);
@@ -358,9 +361,9 @@ describe('InfluxDB', function () {
     });
   });
 
-  describe('#getSeriesNames', function () {
+  describe('#getSeries', function () {
     it('should return array of series names', function (done) {
-      client.getSeriesNames(info.db.name, function (err, series) {
+      client.getSeries({database: info.db.name}, function (err, series) {
         if (err) return done(err);
         assert(series instanceof Array);
         assert.notEqual(series.indexOf(info.series.name), -1);
@@ -368,7 +371,7 @@ describe('InfluxDB', function () {
       });
     });
     it('should return array of series names from the db defined on connection', function (done) {
-      client.getSeriesNames(function (err, series) {
+      client.getSeries(function (err, series) {
         if (err) return done(err);
         assert(series instanceof Array);
         assert.notEqual(series.indexOf(info.series.name), -1);
@@ -376,7 +379,7 @@ describe('InfluxDB', function () {
       });
     });
     it('should bubble errors through', function (done) {
-      failClient.getSeriesNames(info.db.name, function (err) {
+      failClient.getSeries({database: info.db.name}, function (err) {
         assert(err instanceof Error);
         done();
       });
@@ -419,15 +422,45 @@ describe('Helpers', function () {
 
   describe('parseResult()', function () {
     assert.deepEqual(influx.parseResult({
-      'name': 'response_time',
-      'columns': ['time', 'sequence_number', 'value'],
-      'points': [
-        [1383934015207, 23169, 232],
-        [1383934015205, 23168, 232]
+      results: [{
+        series:[{
+          'name': 'response_time',
+          'columns': ['time', 'sequence_number', 'value'],
+          'values': [
+            [1383934015207, 23169, 232],
+            [1383934015205, 23168, 232]
+          ],
+          tags: {
+            foo: 'bar',
+            company: 'barfoo'
+          }
+        }]
+      }],
+    }), {
+      response_time: [
+        {
+          tags: {
+            foo: 'bar',
+            company: 'barfoo'
+          },
+          values: {
+            time: 1383934015207,
+            sequence_number: 23169,
+            value: 232
+          }
+        },
+        {
+          tags: {
+            foo: 'bar',
+            company: 'barfoo'
+          },
+          values: {
+            time: 1383934015205,
+            sequence_number: 23168,
+            value: 232
+          }
+        }
       ]
-    }), [
-      {time: 1383934015207, sequence_number: 23169, value: 232},
-      {time: 1383934015205, sequence_number: 23168, value: 232}
-    ]);
+    });
   });
 });

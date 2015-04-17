@@ -9,12 +9,40 @@ var defaultOptions = {
   username            : 'root',
   password            : 'root',
   port                : 8086,
-  depreciatedLogging  : (process.env.NODE_ENV === undefined || 'development') ? console.log : false,
   failoverTimeout     : 60000,
   requestTimeout      : null,
   maxRetries          : 2,
   timePrecision       : 'ms',
   retentionPolicy     : 'default'
+};
+
+var parseResult = function(res) {
+  var result = [];
+  if(res.error){
+    return {error: res.error};
+  }
+  _.each(res.results, function(query) {
+    var resultQuery = {};
+
+    _.each(query.series, function(point) {
+      resultQuery[point.name] = resultQuery[point.name] || [];
+
+      _.each(point.values, function(value) {
+        var objectPoint = {values: {}};
+
+        _.each(point.columns, function(name, i) {
+          objectPoint.values[name] = value[i];
+          if(point.tags){
+            objectPoint.tags = point.tags;
+          }
+        });
+        resultQuery[point.name].push(objectPoint);
+      });
+    });
+    result.push(resultQuery);
+  });
+  result = result.length === 1 ? result[0] : result;
+  return result;
 };
 
 var InfluxDB = function(options) {
@@ -40,6 +68,13 @@ var InfluxDB = function(options) {
   }
 
   return this;
+};
+
+var createClient = function() {
+  var args = arguments;
+  var Client = function () { return InfluxDB.apply(this, args); };
+  Client.prototype = InfluxDB.prototype;
+  return new Client();
 };
 
 InfluxDB.prototype._parseCallback = function(callback) {
@@ -158,8 +193,6 @@ InfluxDB.prototype.writeSeries = function(series, tags, options, callback) {
   data.database = options.database || this.options.database;
   data.retentionPolicy = options.retentionPolicy || this.options.retentionPolicy;
 
-  console.log(data);
-
   this.request.post({
     url: this.seriesUrl(options.database,query),
     headers: {
@@ -179,12 +212,13 @@ InfluxDB.prototype.writePoint = function(seriesName, values, tags, options, call
   this.writeSeries(data, tags, options, callback);
 };
 
-InfluxDB.prototype.writePoints = function(seriesName, points, tags, options, callback) {
-  var data = {points: points};
-  _.each(data.points, function(p){
+InfluxDB.prototype.writePoints = function(seriesName, values, tags, options, callback) {
+  var data = {points: []};
+  _.each(values, function(p){
     var dataValue = {};
     dataValue.fields = p;
     dataValue.name = p.name || seriesName;
+    data.points.push(dataValue);
   });
   this.writeSeries(data, tags, options, callback);
 };
@@ -195,11 +229,15 @@ InfluxDB.prototype.query = function(query, options, callback) {
     options = {};
   }
   var databaseName = options.database || this.options.database;
-
   this.request.get({
-    url: this.url('query/', { q: query, db: databaseName}),
+    url: this.url('query', { q: query, db: databaseName}),
     json: true
-  }, this._parseCallback(callback));
+  }, this._parseCallback( function(err, result){
+    if(result && result !== {}){
+      result = parseResult(result);
+    }
+    callback(err, result);
+  }));
 };
 
 InfluxDB.prototype.dropSeries  = function(seriesName, options, callback) {
@@ -299,24 +337,6 @@ InfluxDB.prototype.getHostsAvailable = function()
 InfluxDB.prototype.getHostsDisabled = function()
 {
   return this.request.getHostsDisabled();
-};
-
-var createClient = function() {
-  var args = arguments;
-  var Client = function () { return InfluxDB.apply(this, args); };
-  Client.prototype = InfluxDB.prototype;
-  return new Client();
-};
-
-
-var parseResult = function(res) {
-  return _.map(res.points, function(point) {
-    var objectPoint = {};
-    _.each(res.columns, function(name, n) {
-      objectPoint[name] = point[n];
-    });
-    return objectPoint;
-  });
 };
 
 module.exports = createClient;
